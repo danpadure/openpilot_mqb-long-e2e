@@ -45,7 +45,25 @@ inline half val_from_10(const uchar * source, int gx, int gy, half black_level) 
   int offset = gx % 2;
   uint major = (uint)source[start + offset] << 4;
   uint minor = (source[start + 2] >> (4 * offset)) & 0xf;
-  half pv = (half)((major + minor)/4);
+
+  uint combined = major + minor;
+  
+  uint decompressed = combined;
+
+  // TODO: make fast
+  /*
+  // decompress - Legacy kneepoints
+  uint decompressed;
+  if (combined > 3040) {
+    decompressed = (combined - 3040) * 1024 + 65536;
+  } else if (combined > 2048) {
+    decompressed = (combined - 2048) * 64 + 2048;
+  } else {
+    decompressed = combined;
+  }
+  */
+
+  half pv = min(decompressed, (uint)4096) / 4.0; // Clip to 12 bit, and scale back into 10 bit for compatibility
 
   // normalize
   pv = max((half)0.0, pv - black_level);
