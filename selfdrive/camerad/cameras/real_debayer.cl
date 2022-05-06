@@ -39,35 +39,48 @@ half3 color_correct(half3 rgb) {
   return ret;
 }
 
+
 inline half val_from_10(const uchar * source, int gx, int gy, half black_level) {
   // parse 12bit
   int start = gy * FRAME_STRIDE + (3 * (gx / 2)) + (FRAME_STRIDE * FRAME_OFFSET);
   int offset = gx % 2;
   uint major = (uint)source[start + offset] << 4;
   uint minor = (source[start + 2] >> (4 * offset)) & 0xf;
-
   uint combined = major + minor;
-  
+
+  // decompress - Legacy kneepoints
   uint decompressed = combined;
 
-  // TODO: make fast
-  /*
-  // decompress - Legacy kneepoints
-  uint decompressed;
+  /* TODO: Make fast
   if (combined > 3040) {
     decompressed = (combined - 3040) * 1024 + 65536;
   } else if (combined > 2048) {
     decompressed = (combined - 2048) * 64 + 2048;
-  } else {
-    decompressed = combined;
   }
   */
 
-  half pv = min(decompressed, (uint)4096) / 4.0; // Clip to 12 bit, and scale back into 10 bit for compatibility
+  decompressed -= black_level * 4;
 
-  // normalize
-  pv = max((half)0.0, pv - black_level);
-  pv /= (1024.0f - black_level);
+  // https://www.cl.cam.ac.uk/teaching/1718/AdvGraph/06_HDR_and_tone_mapping.pdf
+
+  // Power function (slide 15)
+  // half percentile_99 = 8704.0;
+  // half pv = pow(decompressed / percentile_99, 0.6) * 0.50;
+
+  // Sigmoidal tone mapping (slide 30)
+  // half geometric_mean = 963;
+  // half a = 0.1;
+
+  // When b = 1.0
+  // half pv = decompressed / ((geometric_mean / a) + decompressed);
+
+  // half b = 0.8;
+  // half pow_b = pow(decompressed, b);
+  // half pv = pow_b / (pow(geometric_mean / a, b) + pow_b);
+
+  // Original (non HDR)
+  half pv = decompressed / 4096.0;
+  pv = clamp((half)0.0, (half)1.0, pv);
 
   // correct vignetting
   if (CAM_NUM == 1) { // fcamera
