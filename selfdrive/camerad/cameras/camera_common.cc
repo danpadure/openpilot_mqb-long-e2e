@@ -148,7 +148,7 @@ bool CameraBuf::acquire() {
   cur_camera_buf = &camera_bufs[cur_buf_idx];
 
   // Parse histogram to find mean/max for tone mapping
-  double geometric_mean = camera_state->ar0231_get_geometric_mean(cur_camera_buf);
+  cur_frame_data.histogram_geometric_mean = camera_state->ar0231_get_geometric_mean(cur_camera_buf);
 
   double start_time = millis_since_boot();
 
@@ -162,7 +162,7 @@ bool CameraBuf::acquire() {
 #else
     if (camera_state->camera_id == CAMERA_ID_IMX390) black_level = 64.0;
 #endif
-    debayer->queue(q, camrabuf_cl, cur_rgb_buf->buf_cl, rgb_width, rgb_height, gain, black_level, geometric_mean, &event);
+    debayer->queue(q, camrabuf_cl, cur_rgb_buf->buf_cl, rgb_width, rgb_height, gain, black_level, cur_frame_data.histogram_geometric_mean, &event);
   } else {
     assert(rgb_stride == camera_state->ci.frame_stride);
     CL_CHECK(clEnqueueCopyBuffer(q, camrabuf_cl, cur_rgb_buf->buf_cl, 0, 0, cur_rgb_buf->len, 0, 0, &event));

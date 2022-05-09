@@ -1126,7 +1126,6 @@ void CameraState::handle_camera_event(void *evdat) {
 
 void CameraState::set_camera_exposure(float grey_frac) {
   if (!enabled) return;
-  return;
 
   const float dt = 0.05;
 
@@ -1266,16 +1265,8 @@ static void ar0231_process_registers(MultiCameraState *s, CameraState *c, cereal
   framed.setTemperaturesC({temp_0, temp_1});
 }
 
-static void driver_cam_auto_exposure(CameraState *c, SubMaster &sm) {
-  struct ExpRect {int x1, x2, x_skip, y1, y2, y_skip;};
-  const CameraBuf *b = &c->buf;
-  static ExpRect rect = {96, 1832, 2, 242, 1148, 4};
-  camera_autoexposure(c, set_exposure_target(b, rect.x1, rect.x2, rect.x_skip, rect.y1, rect.y2, rect.y_skip));
-}
-
 static void process_driver_camera(MultiCameraState *s, CameraState *c, int cnt) {
   s->sm->update(0);
-  driver_cam_auto_exposure(c, *(s->sm));
 
   MessageBuilder msg;
   auto framed = msg.initEvent().initDriverCameraState();
@@ -1288,6 +1279,9 @@ static void process_driver_camera(MultiCameraState *s, CameraState *c, int cnt) 
     ar0231_process_registers(s, c, framed);
   }
   s->pm->send("driverCameraState", msg);
+
+  float measured_grey = c->buf.cur_frame_data.histogram_geometric_mean / 4096.0;
+  camera_autoexposure(c, measured_grey);
 }
 
 void process_road_camera(MultiCameraState *s, CameraState *c, int cnt) {
@@ -1313,9 +1307,8 @@ void process_road_camera(MultiCameraState *s, CameraState *c, int cnt) {
 
   s->pm->send(c == &s->road_cam ? "roadCameraState" : "wideRoadCameraState", msg);
 
-  const auto [x, y, w, h] = (c == &s->wide_road_cam) ? std::tuple(96, 250, 1734, 524) : std::tuple(96, 160, 1734, 986);
-  const int skip = 2;
-  camera_autoexposure(c, set_exposure_target(b, x, x + w, skip, y, y + h, skip));
+  float measured_grey = c->buf.cur_frame_data.histogram_geometric_mean / 4096.0;
+  camera_autoexposure(c, measured_grey);
 }
 
 void cameras_run(MultiCameraState *s) {
