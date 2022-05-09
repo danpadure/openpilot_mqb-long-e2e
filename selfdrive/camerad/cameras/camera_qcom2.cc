@@ -1038,9 +1038,9 @@ std::vector<int> CameraState::ar0231_parse_histogram(uint8_t *data) {
   int sum = 0;
   const int bytes_in_histogram = AR0231_NUM_HISTOGRAM_BINS * 3;
   for (int i = 15; i < 15 + bytes_in_histogram; i += 3) {
-    uint32_t byte_0 = ((uint32_t)data[i + 0] << 2) | ((data[i + 2] >> 2) & 0b11);
-    uint32_t byte_1 = ((uint32_t)data[i + 1] << 2) | ((data[i + 2] >> 6) & 0b11);
-    uint32_t val = (byte_0 << 10) | byte_1;
+    uint32_t word_0 = ((uint32_t)data[i + 0] << 2) | ((data[i + 2] >> 2) & 0b11);
+    uint32_t word_1 = ((uint32_t)data[i + 1] << 2) | ((data[i + 2] >> 6) & 0b11);
+    uint32_t val = (word_0 << 10) | word_1;
 
     sum += val;
     bin_vals.push_back(val);
@@ -1053,7 +1053,7 @@ std::vector<int> CameraState::ar0231_parse_histogram(uint8_t *data) {
 }
 
 double CameraState::ar0231_get_geometric_mean(VisionBuf *camera_buf) {
-  uint8_t *data = (uint8_t*)camera_buf->addr + ci.stats_offset;
+  uint8_t *data = (uint8_t*)camera_buf->addr + ci.stats_offset * ci.frame_stride;
   std::vector<int> histogram = ar0231_parse_histogram(data);
 
   double sum_logs = 0;
