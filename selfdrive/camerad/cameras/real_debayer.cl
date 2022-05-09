@@ -35,12 +35,12 @@ half3 color_correct(half3 rgb) {
   ret.x = gamma_apply(ret.x, mp_default);
   ret.y = gamma_apply(ret.y, mp_default);
   ret.z = gamma_apply(ret.z, mp_default);
-  ret = clamp(0.0, 255.0, ret*255.0);
+  ret = clamp(ret*255.0, 0.0, 255.0);
   return ret;
 }
 
 
-inline half val_from_10(const uchar * source, int gx, int gy, half black_level) {
+inline half val_from_10(const uchar * source, int gx, int gy, half black_level, half geometric_mean) {
   // parse 12bit
   int start = gy * FRAME_STRIDE + (3 * (gx / 2)) + (FRAME_STRIDE * FRAME_OFFSET);
   int offset = gx % 2;
@@ -51,13 +51,11 @@ inline half val_from_10(const uchar * source, int gx, int gy, half black_level) 
   // decompress - Legacy kneepoints
   uint decompressed = combined;
 
-  /* TODO: Make fast
   if (combined > 3040) {
     decompressed = (combined - 3040) * 1024 + 65536;
   } else if (combined > 2048) {
     decompressed = (combined - 2048) * 64 + 2048;
   }
-  */
 
   decompressed -= black_level * 4;
 
@@ -68,19 +66,19 @@ inline half val_from_10(const uchar * source, int gx, int gy, half black_level) 
   // half pv = pow(decompressed / percentile_99, 0.6) * 0.50;
 
   // Sigmoidal tone mapping (slide 30)
-  // half geometric_mean = 963;
-  // half a = 0.1;
+  float a = 0.05;
 
   // When b = 1.0
-  // half pv = decompressed / ((geometric_mean / a) + decompressed);
+  // float out = decompressed / ((geometric_mean / a) + decompressed);
 
-  // half b = 0.8;
-  // half pow_b = pow(decompressed, b);
-  // half pv = pow_b / (pow(geometric_mean / a, b) + pow_b);
+  float b = 1.0;
+  float pow_b = pow(decompressed, b);
+  float out = pow_b / (pow(geometric_mean / a, b) + pow_b);
+
+  half pv = clamp((half)out, (half)0.0, (half)1.0);
 
   // Original (non HDR)
-  half pv = decompressed / 4096.0;
-  pv = clamp((half)0.0, (half)1.0, pv);
+  // half pv = decompressed / 4096.0;
 
   // correct vignetting
   if (CAM_NUM == 1) { // fcamera
@@ -100,7 +98,7 @@ inline half val_from_10(const uchar * source, int gx, int gy, half black_level) 
     pv = s * pv;
   }
 
-  pv = clamp((half)0.0, (half)1.0, pv);
+  pv = clamp(pv, (half)0.0, (half)1.0);
   return pv;
 }
 
@@ -121,7 +119,8 @@ half phi(half x) {
 __kernel void debayer10(const __global uchar * in,
                         __global uchar * out,
                         __local half * cached,
-                        float black_level
+                        float black_level,
+                        float geometric_mean
                        )
 {
   const int x_global = get_global_id(0);
@@ -134,7 +133,7 @@ __kernel void debayer10(const __global uchar * in,
 
   int out_idx = 3 * x_global + 3 * y_global * RGB_WIDTH;
 
-  half pv = val_from_10(in, x_global, y_global, black_level);
+  half pv = val_from_10(in, x_global, y_global, black_level, geometric_mean);
   cached[localOffset] = pv;
 
   // cache padding
@@ -148,22 +147,22 @@ __kernel void debayer10(const __global uchar * in,
   if (x_local < 1) {
     localColOffset = x_local;
     globalColOffset = -1;
-    cached[(y_local + 1) * localRowLen + x_local] = val_from_10(in, x_global-x_global_mod, y_global, black_level);
+    cached[(y_local + 1) * localRowLen + x_local] = val_from_10(in, x_global-x_global_mod, y_global, black_level, geometric_mean);
   } else if (x_local >= get_local_size(0) - 1) {
     localColOffset = x_local + 2;
     globalColOffset = 1;
-    cached[localOffset + 1] = val_from_10(in, x_global+x_global_mod, y_global, black_level);
+    cached[localOffset + 1] = val_from_10(in, x_global+x_global_mod, y_global, black_level, geometric_mean);
   }
 
   if (y_local < 1) {
-    cached[y_local * localRowLen + x_local + 1] = val_from_10(in, x_global, y_global-y_global_mod, black_level);
+    cached[y_local * localRowLen + x_local + 1] = val_from_10(in, x_global, y_global-y_global_mod, black_level, geometric_mean);
     if (localColOffset != -1) {
-      cached[y_local * localRowLen + localColOffset] = val_from_10(in, x_global+(x_global_mod*globalColOffset), y_global-y_global_mod, black_level);
+      cached[y_local * localRowLen + localColOffset] = val_from_10(in, x_global+(x_global_mod*globalColOffset), y_global-y_global_mod, black_level, geometric_mean);
     }
   } else if (y_local >= get_local_size(1) - 1) {
-    cached[(y_local + 2) * localRowLen + x_local + 1] = val_from_10(in, x_global, y_global+y_global_mod, black_level);
+    cached[(y_local + 2) * localRowLen + x_local + 1] = val_from_10(in, x_global, y_global+y_global_mod, black_level, geometric_mean);
     if (localColOffset != -1) {
-      cached[(y_local + 2) * localRowLen + localColOffset] = val_from_10(in, x_global+(x_global_mod*globalColOffset), y_global+y_global_mod, black_level);
+      cached[(y_local + 2) * localRowLen + localColOffset] = val_from_10(in, x_global+(x_global_mod*globalColOffset), y_global+y_global_mod, black_level, geometric_mean);
     }
   }
 
@@ -228,7 +227,7 @@ __kernel void debayer10(const __global uchar * in,
     }
   }
 
-  rgb = clamp(0.0, 1.0, rgb);
+  rgb = clamp(rgb, 0.0, 1.0);
   rgb = color_correct(rgb);
 
   out[out_idx + 0] = (uchar)(rgb.z);

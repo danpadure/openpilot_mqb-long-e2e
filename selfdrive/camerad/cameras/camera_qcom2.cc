@@ -1047,7 +1047,7 @@ std::vector<int> CameraState::ar0231_parse_histogram(uint8_t *data) {
   }
 
   // Sum of histogram should be the number of green pixels on even rows, i.e. 1/4th of the total pixels
-  assert(sum == ci.frame_width * ci.frame_height / 4);
+  // assert(sum == ci.frame_width * ci.frame_height / 4);
 
   return bin_vals;
 }
@@ -1126,6 +1126,8 @@ void CameraState::handle_camera_event(void *evdat) {
 
 void CameraState::set_camera_exposure(float grey_frac) {
   if (!enabled) return;
+  return;
+
   const float dt = 0.05;
 
   const float ts_grey = 10.0;
