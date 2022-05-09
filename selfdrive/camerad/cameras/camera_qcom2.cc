@@ -1052,8 +1052,8 @@ std::vector<int> CameraState::ar0231_parse_histogram(uint8_t *data) {
   return bin_vals;
 }
 
-double CameraState::ar0231_get_geometric_mean(VisionBuf *buf) {
-  uint8_t *data = (uint8_t*)buf->addr + ci.stats_offset;
+double CameraState::ar0231_get_geometric_mean(VisionBuf *camera_buf) {
+  uint8_t *data = (uint8_t*)camera_buf->addr + ci.stats_offset;
   std::vector<int> histogram = ar0231_parse_histogram(data);
 
   double sum_logs = 0;
