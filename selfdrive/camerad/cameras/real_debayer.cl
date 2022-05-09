@@ -58,21 +58,17 @@ inline half val_from_10(const uchar * source, int gx, int gy, half black_level, 
   // https://www.cl.cam.ac.uk/teaching/1718/AdvGraph/06_HDR_and_tone_mapping.pdf
   // Power function (slide 15)
   // half percentile_99 = 8704.0;
-  // half out = pow(decompressed / percentile_99, (half)0.6) * 0.50;
+  // half pv = pow(decompressed / percentile_99, (half)0.6) * 0.50;
 
   // Sigmoidal tone mapping (slide 30)
-  half a = 0.05;
 
-  // When b = 1.0
   // half out = decompressed / ((geometric_mean / a) + decompressed); // This is not numerically stable in halfs
-  half decompressed_times_a = decompressed * a;
-  half out = decompressed_times_a / (geometric_mean  + decompressed_times_a);
+  half decompressed_times_a = decompressed * 0.05;
+  half pv = decompressed_times_a / (geometric_mean  + decompressed_times_a);
 
   // half b = 1.0;
   // float pow_b = pow(decompressed, b);
-  // float out = pow_b / (pow(geometric_mean / a, b) + pow_b);
-
-  half pv = out;
+  // float pv = pow_b / (pow(geometric_mean / a, b) + pow_b);
 
   // Original (non HDR)
   // half pv = decompressed / 4096.0;
