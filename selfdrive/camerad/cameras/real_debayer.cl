@@ -46,36 +46,31 @@ inline half val_from_10(const uchar * source, int gx, int gy, half black_level, 
   int offset = gx % 2;
   uint major = (uint)source[start + offset] << 4;
   uint minor = (source[start + 2] >> (4 * offset)) & 0xf;
-  uint combined = major + minor;
 
   // decompress - Legacy kneepoints
-  uint decompressed = combined;
-
-  if (combined > 3040) {
-    decompressed = (combined - 3040) * 1024 + 65536;
-  } else if (combined > 2048) {
-    decompressed = (combined - 2048) * 64 + 2048;
-  }
+  half kn_0 = major + minor;
+  half kn_2048 = (kn_0 - 2048) * 64 + 2048;
+  half kn_3040 = (kn_0 - 3040) * 1024 + 65536;
+  half decompressed = max(kn_0, max(kn_2048, kn_3040));
 
   decompressed -= black_level * 4;
 
   // https://www.cl.cam.ac.uk/teaching/1718/AdvGraph/06_HDR_and_tone_mapping.pdf
-
   // Power function (slide 15)
   // half percentile_99 = 8704.0;
   // half pv = pow(decompressed / percentile_99, 0.6) * 0.50;
 
   // Sigmoidal tone mapping (slide 30)
-  float a = 0.05;
+  half a = 0.05;
 
   // When b = 1.0
-  // float out = decompressed / ((geometric_mean / a) + decompressed);
+  float out = decompressed / ((geometric_mean / a) + decompressed);
 
-  float b = 1.0;
-  float pow_b = pow(decompressed, b);
-  float out = pow_b / (pow(geometric_mean / a, b) + pow_b);
+  // half b = 1.0;
+  // float pow_b = pow(decompressed, b);
+  // float out = pow_b / (pow(geometric_mean / a, b) + pow_b);
 
-  half pv = clamp((half)out, (half)0.0, (half)1.0);
+  half pv = out;
 
   // Original (non HDR)
   // half pv = decompressed / 4096.0;
