@@ -63,7 +63,7 @@ inline half val_from_10(const uchar * source, int gx, int gy, half black_level, 
   // Sigmoidal tone mapping (slide 30)
 
   // half out = decompressed / ((geometric_mean / a) + decompressed); // This is not numerically stable in halfs
-  half decompressed_times_a = decompressed * 0.05;
+  half decompressed_times_a = decompressed * (half)0.05;
   half pv = decompressed_times_a / (geometric_mean  + decompressed_times_a);
 
   // half b = 1.0;
