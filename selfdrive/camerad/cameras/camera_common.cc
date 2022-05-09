@@ -144,9 +144,14 @@ bool CameraBuf::acquire() {
   cl_mem camrabuf_cl = camera_bufs[cur_buf_idx].buf_cl;
   cl_event event;
 
+  cur_camera_buf = &camera_bufs[cur_buf_idx];
+
+  // Parse histogram to find mean/max for tone mapping
+  double geometric_mean = camera_state->ar0231_get_geometric_mean(cur_camera_buf);
+  LOGE("histogram mean %2.f", geometric_mean);
+
   double start_time = millis_since_boot();
 
-  cur_camera_buf = &camera_bufs[cur_buf_idx];
 
   if (debayer) {
     float gain = 0.0;

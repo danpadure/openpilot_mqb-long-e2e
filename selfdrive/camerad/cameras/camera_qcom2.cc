@@ -632,6 +632,22 @@ void CameraState::camera_init(MultiCameraState *multi_cam_state_, VisionIpcServe
   cur_ev[0] = cur_ev[1] = cur_ev[2] = (dc_gain_enabled ? DC_GAIN : 1) * sensor_analog_gains[gain_idx] * exposure_time;
 
   buf.init(device_id, ctx, this, v, FRAME_BUF_COUNT, rgb_type, yuv_type);
+
+  // Initialize histogram bins
+  int val = 0;
+  for (int i = 0; i < AR0231_NUM_HISTOGRAM_BINS; i++) {
+    ar0231_histogram_bins[i] = val;
+    int width;
+    if (i <= 63) {
+      width = 64;
+    } else if (i <= 183) {
+      width = 512;
+    } else { // if (i <= 243)
+      width = 16534;
+    }
+    val += width;
+    ar0231_histogram_bin_widths[i] = width;
+  }
 }
 
 void CameraState::camera_open() {
@@ -1007,6 +1023,47 @@ std::map<uint16_t, uint16_t> CameraState::ar0231_parse_registers(uint8_t *data, 
     registers[addr] = ((uint16_t)data[offset.first] << 8) | data[offset.second];
   }
   return registers;
+}
+
+std::vector<int> CameraState::ar0231_parse_histogram(uint8_t *data) {
+  std::vector<int> bin_vals;
+  bin_vals.reserve(AR0231_NUM_HISTOGRAM_BINS);
+
+  // Each histogram bin is made up from two 10 bit values.
+  // Two 10 bit values are packed as 3 bytes with some padding:
+  // [      2 bytes      ][             1 byte             ]
+  // [ P1[9:2] | P2[9:2] | P2[1:0] | 0b01 | P1[1:0] | 0b01 ]
+  // So each histogram bin takes up 3 bytes in the original data
+
+  int sum = 0;
+  const int bytes_in_histogram = AR0231_NUM_HISTOGRAM_BINS * 3;
+  for (int i = 15; i < 15 + bytes_in_histogram; i += 3) {
+    uint32_t byte_0 = ((uint32_t)data[i + 0] << 2) | ((data[i + 2] >> 2) & 0b11);
+    uint32_t byte_1 = ((uint32_t)data[i + 1] << 2) | ((data[i + 2] >> 6) & 0b11);
+    uint32_t val = (byte_0 << 10) | byte_1;
+
+    sum += val;
+    bin_vals.push_back(val);
+  }
+
+  // Sum of histogram should be the number of green pixels on even rows, i.e. 1/4th of the total pixels
+  assert(sum == ci.frame_width * ci.frame_height / 4);
+
+  return bin_vals;
+}
+
+double CameraState::ar0231_get_geometric_mean(VisionBuf *buf) {
+  uint8_t *data = (uint8_t*)buf->addr + ci.stats_offset;
+  std::vector<int> histogram = ar0231_parse_histogram(data);
+
+  double sum_logs = 0;
+  int total = 0;
+  for (int i = 0; i < AR0231_NUM_HISTOGRAM_BINS; i++) {
+    total += histogram[i];
+    sum_logs += histogram[i] * log(ar0231_histogram_bins[i] + ar0231_histogram_bin_widths[i] / 2);
+  }
+
+  return exp(sum_logs / total);
 }
 
 void CameraState::handle_camera_event(void *evdat) {
