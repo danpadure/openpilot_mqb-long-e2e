@@ -1280,7 +1280,7 @@ static void process_driver_camera(MultiCameraState *s, CameraState *c, int cnt) 
   }
   s->pm->send("driverCameraState", msg);
 
-  float measured_grey = c->buf.cur_frame_data.histogram_geometric_mean / 1024.0;
+  float measured_grey = c->buf.cur_frame_data.histogram_geometric_mean / 2048.0;
   camera_autoexposure(c, measured_grey);
 }
 
@@ -1307,7 +1307,7 @@ void process_road_camera(MultiCameraState *s, CameraState *c, int cnt) {
 
   s->pm->send(c == &s->road_cam ? "roadCameraState" : "wideRoadCameraState", msg);
 
-  float measured_grey = c->buf.cur_frame_data.histogram_geometric_mean / 1024.0;
+  float measured_grey = c->buf.cur_frame_data.histogram_geometric_mean / 2048.0;
   camera_autoexposure(c, measured_grey);
 }
 
