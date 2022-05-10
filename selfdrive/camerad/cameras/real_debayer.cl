@@ -10,33 +10,19 @@ const __constant half3 color_correction_0 = (half3)(1.82717181, -0.31231438, 0.0
 const __constant half3 color_correction_1 = (half3)(-0.5743977, 1.36858544, -0.53183455);
 const __constant half3 color_correction_2 = (half3)(-0.25277411, -0.05627105, 1.45875782);
 
-// tone mapping params
-const half gamma_k = 0.75;
-const half gamma_b = 0.125;
-const half mp_default = 0.01; // ideally midpoint should be adaptive
-
-half gamma_apply(half x, half mp) {
-  // poly approximation for s curve
-  half rk = 9 - 100*mp;
-  if (x > mp) {
-    return (rk * (x-mp) * (1-(gamma_k*mp+gamma_b)) * (1+1/(rk*(1-mp))) / (1+rk*(x-mp))) + gamma_k*mp + gamma_b;
-  } else if (x < mp) {
-    return (rk * (x-mp) * (gamma_k*mp+gamma_b) * (1+1/(rk*mp)) / (1-rk*(x-mp))) + gamma_k*mp + gamma_b;
-  } else {
-    return x;
-  }
-}
-
 half3 color_correct(half3 rgb) {
   half3 ret = (half3)(0.0, 0.0, 0.0);
   ret += (half)rgb.x * color_correction_0;
   ret += (half)rgb.y * color_correction_1;
   ret += (half)rgb.z * color_correction_2;
-  ret.x = gamma_apply(ret.x, mp_default);
-  ret.y = gamma_apply(ret.y, mp_default);
-  ret.z = gamma_apply(ret.z, mp_default);
-  ret = clamp(ret*255.0, 0.0, 255.0);
   return ret;
+}
+
+half3 srgb_gamma(half3 p) {
+  // go all out and add an sRGB gamma curve
+  const half3 ph = (1.0 + 0.055)*pow(p, 1/2.4) - 0.055;
+       const half3 pl = p*12.92;
+       return select(ph, pl, islessequal(p, 0.0031308));
 }
 
 
@@ -63,8 +49,8 @@ inline half val_from_10(const uchar * source, int gx, int gy, half black_level, 
   // Sigmoidal tone mapping (slide 30)
 
   // half out = decompressed / ((geometric_mean / a) + decompressed); // This is not numerically stable in halfs
-  half decompressed_times_a = decompressed * (half)0.05;
-  half pv = decompressed_times_a / (geometric_mean  + decompressed_times_a);
+  half decompressed_times_a = decompressed * (half)0.4;
+  half pv = decompressed_times_a / (geometric_mean + decompressed_times_a);
 
   // half b = 1.0;
   // float pow_b = pow(decompressed, b);
@@ -222,6 +208,8 @@ __kernel void debayer10(const __global uchar * in,
 
   rgb = clamp(rgb, 0.0, 1.0);
   rgb = color_correct(rgb);
+  rgb = srgb_gamma(rgb);
+  rgb = clamp(rgb*255.0, 0.0, 255.0);
 
   out[out_idx + 0] = (uchar)(rgb.z);
   out[out_idx + 1] = (uchar)(rgb.y);
