@@ -42,7 +42,7 @@ half tonemap(float input, half geometric_mean) {
   // Sigmoidal tone mapping (slide 30)
 
   // Optimized case of b = 1
-  float decompressed_times_a = input * 0.4;
+  float decompressed_times_a = input * 0.3;
   float pv = decompressed_times_a / (geometric_mean + decompressed_times_a);
 
   // half b = 1.0;
