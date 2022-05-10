@@ -25,9 +25,9 @@ half3 srgb_gamma(half3 p) {
        return select(ph, pl, islessequal(p, 0.0031308));
 }
 
-float decompress_12(uint major, uint minor) {
+float decompress_12(uint compressed) {
   // decompress - Legacy kneepoints
-  float kn_0 = major + minor;
+  float kn_0 = compressed;
   float kn_2048 = (kn_0 - 2048) * 64 + 2048;
   float kn_3040 = (kn_0 - 3040) * 1024 + 65536;
   return max(kn_0, max(kn_2048, kn_3040));
@@ -58,7 +58,11 @@ inline half val_from_10(const uchar * source, int gx, int gy, half black_level, 
   int start = gy * FRAME_STRIDE + (3 * (gx / 2)) + (FRAME_STRIDE * FRAME_OFFSET);
   int offset = gx % 2;
 
-  float decompressed = decompress_12((uint)source[start + offset] << 4, (source[start + 2] >> (4 * offset)) & 0xf);
+  uint compressed = (uint)source[start + offset] << 4;
+  compressed |= (source[start + 2] >> (4 * offset)) & 0xf;
+
+  float decompressed = decompress_12(compressed);
+
   decompressed -= black_level * 4;
   half pv = tonemap(decompressed, geometric_mean);
 
