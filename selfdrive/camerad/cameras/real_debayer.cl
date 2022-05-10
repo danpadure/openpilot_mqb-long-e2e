@@ -25,22 +25,15 @@ half3 srgb_gamma(half3 p) {
        return select(ph, pl, islessequal(p, 0.0031308));
 }
 
-
-inline half val_from_10(const uchar * source, int gx, int gy, half black_level, half geometric_mean) {
-  // parse 12bit
-  int start = gy * FRAME_STRIDE + (3 * (gx / 2)) + (FRAME_STRIDE * FRAME_OFFSET);
-  int offset = gx % 2;
-  uint major = (uint)source[start + offset] << 4;
-  uint minor = (source[start + 2] >> (4 * offset)) & 0xf;
-
+float decompress_12(uint major, uint minor) {
   // decompress - Legacy kneepoints
-  half kn_0 = major + minor;
-  half kn_2048 = (kn_0 - 2048) * 64 + 2048;
-  half kn_3040 = (kn_0 - 3040) * 1024 + 65536;
-  half decompressed = max(kn_0, max(kn_2048, kn_3040));
+  float kn_0 = major + minor;
+  float kn_2048 = (kn_0 - 2048) * 64 + 2048;
+  float kn_3040 = (kn_0 - 3040) * 1024 + 65536;
+  return max(kn_0, max(kn_2048, kn_3040));
+}
 
-  decompressed -= black_level * 4;
-
+half tonemap(float input, half geometric_mean) {
   // https://www.cl.cam.ac.uk/teaching/1718/AdvGraph/06_HDR_and_tone_mapping.pdf
   // Power function (slide 15)
   // half percentile_99 = 8704.0;
@@ -48,34 +41,29 @@ inline half val_from_10(const uchar * source, int gx, int gy, half black_level, 
 
   // Sigmoidal tone mapping (slide 30)
 
-  // half out = decompressed / ((geometric_mean / a) + decompressed); // This is not numerically stable in halfs
-  half decompressed_times_a = decompressed * (half)0.4;
-  half pv = decompressed_times_a / (geometric_mean + decompressed_times_a);
+  // Optimized case of b = 1
+  float decompressed_times_a = input * 0.4;
+  float pv = decompressed_times_a / (geometric_mean + decompressed_times_a);
 
   // half b = 1.0;
   // float pow_b = pow(decompressed, b);
   // float pv = pow_b / (pow(geometric_mean / a, b) + pow_b);
 
+  return pv;
+}
+
+
+inline half val_from_10(const uchar * source, int gx, int gy, half black_level, half geometric_mean) {
+  // parse 12bit
+  int start = gy * FRAME_STRIDE + (3 * (gx / 2)) + (FRAME_STRIDE * FRAME_OFFSET);
+  int offset = gx % 2;
+
+  float decompressed = decompress_12((uint)source[start + offset] << 4, (source[start + 2] >> (4 * offset)) & 0xf);
+  decompressed -= black_level * 4;
+  half pv = tonemap(decompressed, geometric_mean);
+
   // Original (non HDR)
   // half pv = decompressed / 4096.0;
-
-  // correct vignetting
-  if (CAM_NUM == 1) { // fcamera
-    gx = (gx - RGB_WIDTH/2);
-    gy = (gy - RGB_HEIGHT/2);
-    float r = gx*gx + gy*gy;
-    half s;
-    if (r < 62500) {
-      s = (half)(1.0f + 0.0000008f*r);
-    } else if (r < 490000) {
-      s = (half)(0.9625f + 0.0000014f*r);
-    } else if (r < 1102500) {
-      s = (half)(1.26434f + 0.0000000000016f*r*r);
-    } else {
-      s = (half)(0.53503625f + 0.0000000000022f*r*r);
-    }
-    pv = s * pv;
-  }
 
   pv = clamp(pv, (half)0.0, (half)1.0);
   return pv;
