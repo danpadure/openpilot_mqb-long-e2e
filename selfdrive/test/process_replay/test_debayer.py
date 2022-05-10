@@ -77,7 +77,7 @@ def init_kernels(frame_offset=0):
   return ctx, debayer_prg, rgb_to_yuv_prg
 
 
-def debayer_frame(ctx, debayer_prg, rgb_to_yuv_prg, data, rgb=False):
+def debayer_frame(ctx, debayer_prg, rgb_to_yuv_prg, data, geometric_mean, rgb=False):
   q = cl.CommandQueue(ctx)
 
   rgb_buff = np.empty(FRAME_WIDTH * FRAME_HEIGHT * 3, dtype=np.uint8)
@@ -89,7 +89,7 @@ def debayer_frame(ctx, debayer_prg, rgb_to_yuv_prg, data, rgb=False):
 
   local_worksize = (16, 16) if TICI else (8, 8)
   local_mem = cl.LocalMemory(648 if TICI else 400)
-  ev1 = debayer_prg.debayer10(q, (FRAME_WIDTH, FRAME_HEIGHT), local_worksize, cam_g, rgb_wg, local_mem, np.float32(42))
+  ev1 = debayer_prg.debayer10(q, (FRAME_WIDTH, FRAME_HEIGHT), local_worksize, cam_g, rgb_wg, local_mem, np.float32(42), np.float32(geometric_mean))
   cl.enqueue_copy(q, rgb_buff, rgb_wg, wait_for=[ev1]).wait()
   cl.enqueue_barrier(q)
 
@@ -121,7 +121,8 @@ def debayer_replay(lr):
       cs = m.roadCameraState
       if cs.image:
         data = np.frombuffer(cs.image, dtype=np.uint8)
-        img = debayer_frame(ctx, debayer_prg, rgb_to_yuv_prg, data)
+        geometric_mean = 250 # TODO: get from camerState
+        img = debayer_frame(ctx, debayer_prg, rgb_to_yuv_prg, data, geometric_mean)
 
         frames.append(img)
 
