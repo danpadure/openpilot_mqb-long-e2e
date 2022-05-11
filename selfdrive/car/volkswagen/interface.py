@@ -1,8 +1,11 @@
 from cereal import car
+from common.params import Params
+from panda import Panda
 from selfdrive.car.volkswagen.values import CAR, BUTTON_STATES, CANBUS, NetworkLocation, TransmissionType, GearShifter
 from selfdrive.car import STD_CARGO_KG, scale_rot_inertia, scale_tire_stiffness, gen_empty_fingerprint, get_safety_config
 from selfdrive.car.interfaces import CarInterfaceBase
 
+ButtonType = car.CarState.ButtonEvent.Type
 EventName = car.CarEvent.EventName
 
 
@@ -10,6 +13,7 @@ class CarInterface(CarInterfaceBase):
   def __init__(self, CP, CarController, CarState):
     super().__init__(CP, CarController, CarState)
 
+    self.displayMetricUnitsPrev = None
     self.buttonStatesPrev = BUTTON_STATES.copy()
 
     if CP.networkLocation == NetworkLocation.fwdCamera:
@@ -42,6 +46,12 @@ class CarInterface(CarInterfaceBase):
       else:
         ret.networkLocation = NetworkLocation.fwdCamera
 
+      if Params().get_bool("DisableRadar") and ret.networkLocation == NetworkLocation.gateway:
+        ret.openpilotLongitudinalControl = True
+        ret.safetyConfigs[0].safetyParam |= Panda.FLAG_VOLKSWAGEN_LONG_CONTROL
+        if ret.transmissionType == TransmissionType.manual:
+          ret.minEnableSpeed = 4.5  # FIXME: estimated, fine-tune
+
     # Global lateral tuning defaults, can be overridden per-vehicle
 
     ret.steerActuatorDelay = 0.1
@@ -54,6 +64,16 @@ class CarInterface(CarInterfaceBase):
     ret.lateralTuning.pid.kf = 0.00006
     ret.lateralTuning.pid.kpV = [0.6]
     ret.lateralTuning.pid.kiV = [0.2]
+
+    # Global longitudinal tuning defaults, can be overridden per-vehicle
+
+    ret.pcmCruise = not ret.openpilotLongitudinalControl
+    ret.longitudinalActuatorDelayUpperBound = 0.5  # s
+    ret.stoppingControl = True
+    ret.vEgoStopping = 1.0
+    ret.stopAccel = -1.0
+    ret.longitudinalTuning.kpV = [0.1]
+    ret.longitudinalTuning.kiV = [0.0]
 
     # Per-chassis tuning values, override tuning defaults here if desired
 
@@ -160,10 +180,17 @@ class CarInterface(CarInterfaceBase):
     return ret
 
   # returns a car.CarState
-  def _update(self, c):
+  def update(self, c, can_strings):
     buttonEvents = []
 
+    # Process the most recent CAN message traffic, and check for validity
+    # The camera CAN has no signals we use at this time, but we process it
+    # anyway so we can test connectivity with can_valid
+    self.cp.update_strings(can_strings)
+    self.cp_cam.update_strings(can_strings)
+
     ret = self.CS.update(self.cp, self.cp_cam, self.cp_ext, self.CP.transmissionType)
+    ret.canValid = self.cp.can_valid and self.cp_cam.can_valid
     ret.steeringRateLimited = self.CC.steer_rate_limited if self.CC is not None else False
 
     # Check for and process state-change events (button press or release) from
@@ -175,7 +202,12 @@ class CarInterface(CarInterfaceBase):
         be.pressed = self.CS.buttonStates[button]
         buttonEvents.append(be)
 
-    events = self.create_common_events(ret, extra_gears=[GearShifter.eco, GearShifter.sport, GearShifter.manumatic])
+    events = self.create_common_events(ret, extra_gears=[GearShifter.eco, GearShifter.sport, GearShifter.manumatic],
+                                       pcm_enable=not self.CS.CP.openpilotLongitudinalControl)
+
+    # Vehicle health and operation safety checks
+    if self.CS.tsk_status in (6, 7):
+      events.add(EventName.accFaulted)
 
     # Low speed steer alert hysteresis logic
     if self.CP.minSteerSpeed > 0. and ret.vEgo < (self.CP.minSteerSpeed + 1.):
@@ -185,13 +217,28 @@ class CarInterface(CarInterfaceBase):
     if self.low_speed_alert:
       events.add(EventName.belowSteerSpeed)
 
+    if self.CS.CP.openpilotLongitudinalControl:
+      if ret.vEgo < self.CP.minEnableSpeed + 2.:
+        events.add(EventName.belowEngageSpeed)
+      if c.enabled and ret.vEgo < self.CP.minEnableSpeed:
+        events.add(EventName.speedTooLow)
+      for b in buttonEvents:
+        # do enable on falling edge of both accel and decel buttons
+        if b.type in (ButtonType.setCruise, ButtonType.resumeCruise) and not b.pressed:
+          events.add(EventName.buttonEnable)
+        # do disable on rising edge of cancel
+        if b.type == "cancel" and b.pressed:
+          events.add(EventName.buttonCancel)
+
     ret.events = events.to_msg()
     ret.buttonEvents = buttonEvents
 
     # update previous car states
+    self.displayMetricUnitsPrev = self.CS.displayMetricUnits
     self.buttonStatesPrev = self.CS.buttonStates.copy()
 
-    return ret
+    self.CS.out = ret.as_reader()
+    return self.CS.out
 
   def apply(self, c):
     hud_control = c.hudControl
@@ -200,6 +247,8 @@ class CarInterface(CarInterfaceBase):
                          hud_control.leftLaneVisible,
                          hud_control.rightLaneVisible,
                          hud_control.leftLaneDepart,
-                         hud_control.rightLaneDepart)
+                         hud_control.rightLaneDepart,
+                         hud_control.leadVisible,
+                         hud_control.setSpeed)
     self.frame += 1
     return ret

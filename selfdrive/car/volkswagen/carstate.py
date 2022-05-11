@@ -16,6 +16,7 @@ class CarState(CarStateBase):
       self.shifter_values = can_define.dv["EV_Gearshift"]["GearPosition"]
     self.hca_status_values = can_define.dv["LH_EPS_03"]["EPS_HCA_Status"]
     self.buttonStates = BUTTON_STATES.copy()
+    self.digital_cluster_installed = False
 
   def update(self, pt_cp, cam_cp, ext_cp, trans_type):
     ret = car.CarState.new_message()
@@ -74,6 +75,11 @@ class CarState(CarStateBase):
     # Update seatbelt fastened status.
     ret.seatbeltUnlatched = pt_cp.vl["Airbag_02"]["AB_Gurtschloss_FA"] != 3
 
+    # Update driver preference for metric. VW stores many different unit
+    # preferences, including separate units for for distance vs. speed.
+    # We use the speed preference for OP.
+    self.displayMetricUnits = not pt_cp.vl["Einheiten_01"]["KBI_MFA_v_Einheit_02"]
+
     # Consume blind-spot monitoring info/warning LED states, if available.
     # Infostufe: BSM LED on, Warnung: BSM LED flashing
     if self.CP.enableBsm:
@@ -93,19 +99,21 @@ class CarState(CarStateBase):
     ret.stockAeb = bool(ext_cp.vl["ACC_10"]["ANB_Teilbremsung_Freigabe"]) or bool(ext_cp.vl["ACC_10"]["ANB_Zielbremsung_Freigabe"])
 
     # Update ACC radar status.
-    if pt_cp.vl["TSK_06"]["TSK_Status"] == 2:
+    self.acc_04_stock_values = ext_cp.vl["ACC_04"]
+    self.acc_type = ext_cp.vl["ACC_06"]["ACC_Typ"]
+    self.tsk_status = pt_cp.vl["TSK_06"]["TSK_Status"]
+    if self.tsk_status == 2:
       # ACC okay and enabled, but not currently engaged
       ret.cruiseState.available = True
       ret.cruiseState.enabled = False
-    elif pt_cp.vl["TSK_06"]["TSK_Status"] in (3, 4, 5):
-      # ACC okay and enabled, currently regulating speed (3) or driver accel override (4) or overrun coast-down (5)
+    elif self.tsk_status in (3, 4, 5):
+      # ACC okay and enabled, currently regulating speed (3) or driver accel override (4) or brake only (5)
       ret.cruiseState.available = True
       ret.cruiseState.enabled = True
     else:
       # ACC okay but disabled (1), or a radar visibility or other fault/disruption (6 or 7)
       ret.cruiseState.available = False
       ret.cruiseState.enabled = False
-    ret.accFaulted = pt_cp.vl["TSK_06"]["TSK_Status"] in (6, 7)
 
     # Update ACC setpoint. When the setpoint is zero or there's an error, the
     # radar sends a set-speed of ~90.69 m/s / 203mph.
@@ -137,6 +145,9 @@ class CarState(CarStateBase):
 
     # Additional safety checks performed in CarInterface.
     ret.espDisabled = pt_cp.vl["ESP_21"]["ESP_Tastung_passiv"] != 0
+
+    # Update misc car configuration/equipment info
+    self.digital_cluster_installed = bool(pt_cp.vl["Kombi_03"]["KBI_Variante"])
 
     return ret
 
@@ -171,7 +182,9 @@ class CarState(CarStateBase):
       ("EPS_HCA_Status", "LH_EPS_03"),           # EPS HCA control status
       ("ESP_Tastung_passiv", "ESP_21"),          # Stability control disabled
       ("ESP_Haltebestaetigung", "ESP_21"),       # ESP hold confirmation
+      ("KBI_MFA_v_Einheit_02", "Einheiten_01"),  # MPH vs KMH speed display
       ("KBI_Handbremse", "Kombi_01"),            # Manual handbrake applied
+      ("KBI_Variante", "Kombi_03"),              # Digital/full-screen instrument cluster installed
       ("TSK_Status", "TSK_06"),                  # ACC engagement status from drivetrain coordinator
       ("GRA_Hauptschalter", "GRA_ACC_01"),       # ACC button, on/off
       ("GRA_Abbrechen", "GRA_ACC_01"),           # ACC button, cancel
@@ -201,6 +214,8 @@ class CarState(CarStateBase):
       ("Airbag_02", 5),     # From J234 Airbag control module
       ("Kombi_01", 2),      # From J285 Instrument cluster
       ("Blinkmodi_02", 1),  # From J519 BCM (sent at 1Hz when no lights active, 50Hz when active)
+      ("Einheiten_01", 1),  # From J??? not known if gateway, cluster, or BCM
+      ("Kombi_03", 1),      # From J285 instrument cluster
     ]
 
     if CP.transmissionType == TransmissionType.automatic:
@@ -256,13 +271,20 @@ class MqbExtraSignals:
   # Additional signal and message lists for optional or bus-portable controllers
   fwd_radar_signals = [
     ("ACC_Wunschgeschw", "ACC_02"),              # ACC set speed
+    ("ACC_Charisma_FahrPr", "ACC_04"),           # Driving profile selection
+    ("ACC_Charisma_Status", "ACC_04"),           # Driving profile status
+    ("ACC_Charisma_Umschaltung", "ACC_04"),      # Driving profile switching
+    ("ACC_Texte_braking_guard", "ACC_04"),       # Part of ACC driver alerts in instrument cluster
+    ("ACC_Typ", "ACC_06"),                       # Basic vs F2S vs SNG
     ("AWV2_Freigabe", "ACC_10"),                 # FCW brake jerk release
     ("ANB_Teilbremsung_Freigabe", "ACC_10"),     # AEB partial braking release
     ("ANB_Zielbremsung_Freigabe", "ACC_10"),     # AEB target braking release
   ]
   fwd_radar_checks = [
+    ("ACC_06", 50),                                 # From J428 ACC radar control module
     ("ACC_10", 50),                                 # From J428 ACC radar control module
     ("ACC_02", 17),                                 # From J428 ACC radar control module
+    ("ACC_04", 17),                                 # From J428 ACC radar control module
   ]
   bsm_radar_signals = [
     ("SWA_Infostufe_SWA_li", "SWA_01"),          # Blind spot object info, left
