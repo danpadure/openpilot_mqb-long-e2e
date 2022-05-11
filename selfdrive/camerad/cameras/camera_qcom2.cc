@@ -1128,11 +1128,7 @@ void CameraState::set_camera_exposure(float grey_frac) {
   if (!enabled) return;
 
   const float dt = 0.05;
-
-  const float ts_grey = 10.0;
   const float ts_ev = 0.05;
-
-  const float k_grey = (dt / ts_grey) / (1.0 + dt / ts_grey);
   const float k_ev = (dt / ts_ev) / (1.0 + dt / ts_ev);
 
   // It takes 3 frames for the commanded exposure settings to take effect. The first frame is already started by the time
@@ -1142,11 +1138,7 @@ void CameraState::set_camera_exposure(float grey_frac) {
 
   const float cur_ev_ = cur_ev[buf.cur_frame_data.frame_id % 3];
 
-  // Scale target grey between 0.1 and 0.4 depending on lighting conditions
-  float new_target_grey = std::clamp(0.4 - 0.3 * log2(1.0 + cur_ev_) / log2(6000.0), 0.1, 0.4);
-  float target_grey = (1.0 - k_grey) * target_grey_fraction + k_grey * new_target_grey;
-
-  float desired_ev = std::clamp(cur_ev_ * target_grey / grey_frac, min_ev, max_ev);
+  float desired_ev = std::clamp(cur_ev_ * target_grey_fraction / grey_frac, min_ev, max_ev);
   float k = (1.0 - k_ev) / 3.0;
   desired_ev = (k * cur_ev[0]) + (k * cur_ev[1]) + (k * cur_ev[2]) + (k_ev * desired_ev);
 
@@ -1156,12 +1148,7 @@ void CameraState::set_camera_exposure(float grey_frac) {
 
   // Hysteresis around high conversion gain
   // We usually want this on since it results in lower noise, but turn off in very bright day scenes
-  bool enable_dc_gain = dc_gain_enabled;
-  if (!enable_dc_gain && target_grey < 0.2) {
-    enable_dc_gain = true;
-  } else if (enable_dc_gain && target_grey > 0.3) {
-    enable_dc_gain = false;
-  }
+  bool enable_dc_gain = false; // TODO: find other way to switch
 
   // Simple brute force optimizer to choose sensor parameters
   // to reach desired EV
@@ -1198,7 +1185,6 @@ void CameraState::set_camera_exposure(float grey_frac) {
   exp_lock.lock();
 
   measured_grey_fraction = grey_frac;
-  target_grey_fraction = target_grey;
 
   analog_gain_frac = sensor_analog_gains[new_g];
   gain_idx = new_g;
